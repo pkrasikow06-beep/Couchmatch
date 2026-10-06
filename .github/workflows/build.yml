@@ -1,0 +1,72 @@
+# Baut die Couchmatch-App auf einem Mac von GitHub und stellt "Couchmatch.ipa" zum Download bereit.
+name: iPhone-App bauen
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    steps:
+      - name: Code holen
+        uses: actions/checkout@v4
+
+      - name: TMDB-Schlüssel prüfen
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          if [ -z "$TMDB_API_KEY" ]; then
+            echo "::error::Das Secret TMDB_API_KEY fehlt. Lege es unter Settings > Secrets and variables > Actions an."
+            exit 1
+          fi
+
+      - name: Dateien in Ordner sortieren
+        run: |
+          mkdir -p App/Assets.xcassets/AppIcon.appiconset
+          for f in *.swift Info.plist; do
+            if [ -f "$f" ]; then mv "$f" App/; fi
+          done
+          if [ -f icon-1024.png ]; then mv icon-1024.png App/Assets.xcassets/AppIcon.appiconset/; fi
+          echo '{ "info" : { "author" : "xcode", "version" : 1 } }' > App/Assets.xcassets/Contents.json
+          echo '{ "images" : [ { "filename" : "icon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" } ], "info" : { "author" : "xcode", "version" : 1 } }' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
+          find App -type f
+
+      - name: XcodeGen installieren
+        run: brew install xcodegen
+
+      - name: Xcode-Projekt erzeugen
+        run: xcodegen generate
+
+      - name: App bauen (ohne Signatur)
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          xcodebuild -version
+          xcodebuild \
+            -project Couchmatch.xcodeproj \
+            -target Couchmatch \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            TMDB_API_KEY="$TMDB_API_KEY" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: IPA-Datei packen
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/Couchmatch.app Payload/
+          zip -qry Couchmatch.ipa Payload
+          ls -lh Couchmatch.ipa
+
+      - name: IPA zum Download bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Couchmatch-ipa
+          path: Couchmatch.ipa
+          retention-days: 90
